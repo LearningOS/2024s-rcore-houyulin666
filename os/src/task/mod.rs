@@ -22,6 +22,10 @@ use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
+use crate::timer::get_time_ms;
+pub use crate::syscall::TaskInfo;
+
+use crate::config::MAX_SYSCALL_NUM;
 
 /// The task manager, where all the tasks are managed.
 ///
@@ -54,6 +58,8 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            syscall_times: [0; MAX_SYSCALL_NUM],
+            start_time:0
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -80,6 +86,7 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let task0 = &mut inner.tasks[0];
         task0.task_status = TaskStatus::Running;
+        task0.start_time = get_time_ms();
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -135,6 +142,22 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    fn increase_current_syscall_count(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].syscall_times[syscall_id] += 1;
+    }
+
+    fn get_current_task_info(&self)->TaskInfo{
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        TaskInfo::create_instance (
+            inner.tasks[current].task_status,
+            inner.tasks[current].syscall_times,
+            get_time_ms()-inner.tasks[current].start_time,
+            )
+    }
 }
 
 /// Run the first task in task list.
@@ -168,4 +191,20 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// Increase the syscall times of current task by `syscall_id`
+pub fn increase_current_syscall_count(syscall_id: usize){
+    //code here
+    if syscall_id >= MAX_SYSCALL_NUM{
+        return;
+    }
+    TASK_MANAGER.increase_current_syscall_count(syscall_id);
+    return;
+}
+
+/// Get current task info
+pub fn get_current_task_info()-> TaskInfo{
+    //code here
+    TASK_MANAGER.get_current_task_info()
 }
